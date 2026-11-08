@@ -46,7 +46,7 @@ def setup_logging() -> logging.Logger:
     logger.handlers.clear()
 
     # Create console handler
-    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler = logging.StreamHandler(sys.stderr)
 
     # Set formatter based on configuration
     if settings.log_format == "json":
