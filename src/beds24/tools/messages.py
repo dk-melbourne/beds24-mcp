@@ -2,11 +2,12 @@
 Beds24 Message Tools
 ~~~~~~~~~~~~~~~~~~~~
 
-4 MCP tools for message management:
+5 MCP tools for message management:
 1. get_messages - Get messages for a booking
 2. get_unread_messages - Get all unread messages
 3. send_message - Send message to guest
 4. add_internal_note - Add internal note to booking
+5. mark_messages_read - Mark messages as read
 
 NOTE: Messages are NOT cached (real-time, time-sensitive data)
 """
@@ -16,16 +17,23 @@ from typing import Any
 
 from fastmcp import FastMCP
 
-from src.beds24.client import confirmed_post_item
+from src.beds24.client import confirmed_post_item, get_all_pages
 from src.logger import get_logger
 
 logger = get_logger(__name__)
+
+READ_ONLY = {"readOnlyHint": True, "openWorldHint": True}
+
+
+def _post_item_confirmed(item: Any) -> bool:
+    """True if one result of a Beds24 POST reports success with no errors."""
+    return isinstance(item, dict) and item.get("success") is True and not item.get("errors")
 
 
 def register_message_tools(mcp: FastMCP) -> None:
     """Register all message tools with FastMCP."""
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     async def get_messages(
         booking_id: int | None = None,
         unread_only: bool = False,
@@ -43,7 +51,8 @@ def register_message_tools(mcp: FastMCP) -> None:
             date_from: Only return messages from this date onward (YYYY-MM-DD format)
 
         Returns:
-            List of message objects with booking, sender, and content information
+            List of message objects with booking, sender, and content information.
+            metadata.truncated is True if more pages existed than were read.
         """
         from src.server import get_resources
 
@@ -62,10 +71,10 @@ def register_message_tools(mcp: FastMCP) -> None:
 
             if date_from:
                 from_date = datetime.fromisoformat(date_from.split("T")[0]).date()
-                query_params["maxAge"] = max((datetime.now().date() - from_date).days, 0)
+                query_params["maxAge"] = max((datetime.now().date() - from_date).days, 1)
 
             # Get messages from API (not cached - real-time required)
-            response = await client.get("/bookings/messages", query_params)
+            response = await get_all_pages(client, "/bookings/messages", query_params)
 
             if not response or not response.get("success"):
                 return {
@@ -78,7 +87,11 @@ def register_message_tools(mcp: FastMCP) -> None:
             return {
                 "success": True,
                 "data": messages,
-                "metadata": {"count": len(messages), "cached": False},
+                "metadata": {
+                    "count": len(messages),
+                    "cached": False,
+                    "truncated": response["truncated"],
+                },
             }
 
         except Exception as e:
@@ -88,7 +101,7 @@ def register_message_tools(mcp: FastMCP) -> None:
                 "error": f"Failed to get messages: {str(e)}",
             }
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ_ONLY)
     async def get_unread_messages() -> dict[str, Any]:
         """
         Get all unread messages.
@@ -97,7 +110,8 @@ def register_message_tools(mcp: FastMCP) -> None:
         NOT cached to ensure real-time data.
 
         Returns:
-            List of unread message objects
+            List of unread message objects. metadata.truncated is True if more
+            pages existed than were read.
         """
         from src.server import get_resources
 
@@ -108,7 +122,7 @@ def register_message_tools(mcp: FastMCP) -> None:
             # Query for unread messages only
             query_params = {"filter": "unread"}
 
-            response = await client.get("/bookings/messages", query_params)
+            response = await get_all_pages(client, "/bookings/messages", query_params)
 
             if not response or not response.get("success"):
                 return {
@@ -121,7 +135,11 @@ def register_message_tools(mcp: FastMCP) -> None:
             return {
                 "success": True,
                 "data": messages,
-                "metadata": {"count": len(messages), "cached": False},
+                "metadata": {
+                    "count": len(messages),
+                    "cached": False,
+                    "truncated": response["truncated"],
+                },
             }
 
         except Exception as e:
@@ -131,11 +149,10 @@ def register_message_tools(mcp: FastMCP) -> None:
                 "error": f"Failed to get unread messages: {str(e)}",
             }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": True})
     async def send_message(
         booking_id: int,
         message: str,
-        subject: str | None = None,
     ) -> dict[str, Any]:
         """
         Send message to guest for a booking.
@@ -146,7 +163,6 @@ def register_message_tools(mcp: FastMCP) -> None:
         Args:
             booking_id: The booking ID to send message to
             message: The message text content
-            subject: Optional subject line for the message
 
         Returns:
             Confirmation with booking ID and message sent
@@ -167,9 +183,6 @@ def register_message_tools(mcp: FastMCP) -> None:
                 "bookingId": booking_id,
                 "message": message,
             }
-
-            if subject:
-                message_data["subject"] = subject
 
             # Send message via POST /bookings/messages
             response = await client.post("/bookings/messages", [message_data])
@@ -197,7 +210,7 @@ def register_message_tools(mcp: FastMCP) -> None:
                 "error": f"Failed to send message: {str(e)}",
             }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": False, "openWorldHint": True})
     async def add_internal_note(
         booking_id: int,
         note: str,
@@ -264,4 +277,61 @@ def register_message_tools(mcp: FastMCP) -> None:
                 "error": f"Failed to add internal note: {str(e)}",
             }
 
-    logger.info("Registered 4 message tools")
+    @mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
+    async def mark_messages_read(message_ids: list[int]) -> dict[str, Any]:
+        """
+        Mark messages as read.
+
+        Sets each message to read in Beds24. Does not delete or change message
+        content, and marking an already-read message again is harmless. Succeeds
+        only if Beds24 confirms every message; otherwise lists the ids that failed.
+
+        Args:
+            message_ids: Beds24 message IDs (the "id" of each message from
+                get_messages / get_unread_messages), at least one
+
+        Returns:
+            The ids marked read, or the ids that failed
+        """
+        from src.server import get_resources
+
+        try:
+            if not message_ids:
+                return {"success": False, "error": "message_ids must contain at least one message ID"}
+
+            client = get_resources().beds24_client
+
+            logger.info("mark_messages_read called", extra={"count": len(message_ids)})
+
+            response = await client.post(
+                "/bookings/messages",
+                [{"id": message_id, "read": True} for message_id in message_ids],
+            )
+
+            results = response if isinstance(response, list) else []
+            failed = [
+                message_id
+                for index, message_id in enumerate(message_ids)
+                if index >= len(results) or not _post_item_confirmed(results[index])
+            ]
+            if failed:
+                return {
+                    "success": False,
+                    "error": f"Beds24 did not confirm these messages were marked read: {failed}",
+                    "data": {"failed_ids": failed},
+                }
+
+            return {
+                "success": True,
+                "data": {"message_ids": message_ids},
+                "metadata": {"marked_read": len(message_ids)},
+            }
+
+        except Exception as e:
+            logger.error(f"Error in mark_messages_read: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": f"Failed to mark messages read: {str(e)}",
+            }
+
+    logger.info("Registered 5 message tools")

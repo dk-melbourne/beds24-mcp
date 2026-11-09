@@ -99,10 +99,15 @@ TOOL_ARGS: dict[str, dict[str, Any]] = {
     },
     "get_messages": {"booking_id": 111, "unread_only": True, "date_from": "2027-03-01"},
     "get_unread_messages": {},
-    "send_message": {"booking_id": 111, "message": "Hello", "subject": "Welcome"},
+    "send_message": {"booking_id": 111, "message": "Hello"},
     "add_internal_note": {"booking_id": 111, "note": "Late check-in"},
+    # Messages, reviews and invoices
+    "mark_messages_read": {"message_ids": [11]},
+    "get_reviews": {"channel": "booking", "property_id": 267799, "from_date": "2027-01-01"},
+    "get_invoices": {"booking_id": 111},
 }
 WRITE_TOOLS = [
     "update_pricing", "set_availability", "block_dates",
     "create_booking", "send_message", "add_internal_note",
+    "mark_messages_read",
 ]
