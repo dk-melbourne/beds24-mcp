@@ -98,3 +98,13 @@ async def test_offers_tools_page_and_report_truncation(mcp: Any, beds24: Any, to
     beds24.get_reply = _page([{"roomId": 1, "offers": [offer]}], True)
     result = await call(mcp, tool, args)
     assert result["metadata"]["truncated"] is True
+
+
+@pytest.mark.parametrize("tool", ["get_calendar", "check_availability", "get_best_price"])
+async def test_beds24_error_is_reported_not_treated_as_no_availability(mcp: Any, beds24: Any, tool: str) -> None:
+    from conftest import TOOL_ARGS
+
+    beds24.get_reply = {"success": False, "error": "boom"}
+    result = await call(mcp, tool, TOOL_ARGS[tool])
+    assert result["success"] is False
+    assert "boom" in result["error"]

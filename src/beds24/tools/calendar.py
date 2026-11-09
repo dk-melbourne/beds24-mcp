@@ -100,6 +100,11 @@ def register_calendar_tools(mcp: FastMCP) -> None:
                 endpoint_params["roomId"] = room_id
 
             response_data = await get_all_pages(client, "/inventory/rooms/calendar", endpoint_params)
+            if not response_data.get("success"):
+                return {
+                    "success": False,
+                    "error": f"Beds24 returned an error: {response_data.get('error') or response_data}",
+                }
 
             # Cache the result, but never a partial one
             if not response_data["truncated"]:

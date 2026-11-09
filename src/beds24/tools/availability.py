@@ -99,6 +99,12 @@ def register_availability_tools(mcp: FastMCP) -> None:
 
             # Call API: GET /inventory/rooms/offers
             api_response = await get_all_pages(client, "/inventory/rooms/offers", api_params)
+            # A failed request is not "no availability": report it and cache nothing.
+            if not api_response.get("success"):
+                return {
+                    "success": False,
+                    "error": f"Beds24 returned an error: {api_response.get('error') or api_response}",
+                }
 
             truncated = bool(isinstance(api_response, dict) and api_response.get("truncated"))
 
@@ -234,6 +240,12 @@ def register_availability_tools(mcp: FastMCP) -> None:
 
             # Call API: GET /inventory/rooms/offers
             api_response = await get_all_pages(client, "/inventory/rooms/offers", api_params)
+            # A failed request is not "no availability": report it and cache nothing.
+            if not api_response.get("success"):
+                return {
+                    "success": False,
+                    "error": f"Beds24 returned an error: {api_response.get('error') or api_response}",
+                }
 
             truncated = bool(isinstance(api_response, dict) and api_response.get("truncated"))
 
