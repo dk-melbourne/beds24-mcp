@@ -29,6 +29,7 @@ from typing import Any
 
 from fastmcp import FastMCP
 
+from src.beds24.client import confirmed_post_item
 from src.logger import get_logger
 
 logger = get_logger(__name__)
@@ -523,25 +524,21 @@ def register_booking_tools(mcp: FastMCP) -> None:
             # Make API request (POST with array of bookings)
             response = await client.post("/bookings", [booking_data])
 
-            if not response.get("success"):
-                error_msg = response.get("error") or response.get("message") or "Unknown error"
-                logger.error(f"Failed to create booking: {error_msg}")
+            created = confirmed_post_item(response)
+            if created is None:
+                logger.error(f"Beds24 did not confirm booking creation: {response}")
                 return {
                     "success": False,
-                    "error": f"Failed to create booking: {error_msg}",
+                    "error": f"Beds24 did not confirm the booking was created: {response}",
                 }
 
             # Invalidate all booking caches
             cache.invalidate_bookings()
             logger.info("Invalidated booking caches after creation")
 
-            # Return created booking
-            created_bookings = response.get("data", [])
-            created_booking = created_bookings[0] if created_bookings else None
-
             return {
                 "success": True,
-                "data": created_booking,
+                "data": created,
                 "metadata": {"cache_invalidated": True},
             }
 

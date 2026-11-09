@@ -41,6 +41,17 @@ logger = get_logger(__name__)
 T = TypeVar("T")
 
 
+def confirmed_post_item(response: Any) -> dict[str, Any] | None:
+    """Return the first result of a Beds24 POST if it reports success with no errors.
+
+    Beds24 POST endpoints reply with a list: [{"success", "new"/"modified", "errors", "warnings"}].
+    """
+    item = response[0] if isinstance(response, list) and response else None
+    if isinstance(item, dict) and item.get("success") is True and not item.get("errors"):
+        return item
+    return None
+
+
 class QueuedRequest(Generic[T]):
     """Represents a queued API request with future for result."""
 

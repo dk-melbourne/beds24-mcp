@@ -16,6 +16,7 @@ from typing import Any
 
 from fastmcp import FastMCP
 
+from src.beds24.client import confirmed_post_item
 from src.logger import get_logger
 
 logger = get_logger(__name__)
@@ -173,10 +174,10 @@ def register_message_tools(mcp: FastMCP) -> None:
             # Send message via POST /bookings/messages
             response = await client.post("/bookings/messages", [message_data])
 
-            if not response or not response.get("success"):
+            if confirmed_post_item(response) is None:
                 return {
                     "success": False,
-                    "error": response.get("error") if response else "Failed to send message",
+                    "error": f"Beds24 did not confirm the message was sent: {response}",
                 }
 
             logger.info(
@@ -237,10 +238,10 @@ def register_message_tools(mcp: FastMCP) -> None:
             # Add note via POST /bookings/messages
             response = await client.post("/bookings/messages", [note_data])
 
-            if not response or not response.get("success"):
+            if confirmed_post_item(response) is None:
                 return {
                     "success": False,
-                    "error": response.get("error") if response else "Failed to add internal note",
+                    "error": f"Beds24 did not confirm the note was added: {response}",
                 }
 
             # Invalidate booking cache for this booking since it was modified
