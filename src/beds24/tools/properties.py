@@ -11,6 +11,7 @@ from typing import Any
 
 from fastmcp import FastMCP
 
+from src.beds24.client import get_all_pages
 from src.exceptions import Beds24Error, ConfigurationError
 from src.logger import get_logger
 from src.schemas import GetPropertyRoomsParams, ToolResponse
@@ -21,7 +22,7 @@ logger = get_logger(__name__)
 def register_property_tools(mcp: FastMCP) -> None:
     """Register all property tools with FastMCP."""
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
     async def get_properties() -> dict[str, Any]:
         """
         Get list of all properties.
@@ -51,7 +52,7 @@ def register_property_tools(mcp: FastMCP) -> None:
                 }
 
             # Cache miss - fetch from API
-            response = await client.get("/properties")
+            response = await get_all_pages(client, "/properties")
 
             if not response or not response.get("success"):
                 error_msg = response.get("error") if response else "Unknown error"
@@ -63,13 +64,16 @@ def register_property_tools(mcp: FastMCP) -> None:
 
             properties = response.get("data", [])
 
-            # Cache results (24h TTL)
-            cache.cache_properties_list(properties)
+            truncated = response["truncated"]
+
+            # Cache results (24h TTL), but never a partial list
+            if not truncated:
+                cache.cache_properties_list(properties)
 
             return {
                 "success": True,
                 "data": properties,
-                "metadata": {"cached": False, "count": len(properties)},
+                "metadata": {"cached": False, "count": len(properties), "truncated": truncated},
             }
 
         except Exception as e:
@@ -84,7 +88,7 @@ def register_property_tools(mcp: FastMCP) -> None:
                 "error": error_msg,
             }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
     async def get_property_rooms(property_id: int) -> dict[str, Any]:
         """
         Get rooms for a specific property.

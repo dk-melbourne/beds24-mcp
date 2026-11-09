@@ -83,3 +83,16 @@ async def test_read_tool_never_writes(mcp: Any, beds24: Any, tool: str) -> None:
     await call(mcp, tool, TOOL_ARGS[tool])
     assert beds24.requests, f"{tool} made no request"
     assert all(r["method"] == "get" for r in beds24.requests)
+
+
+async def test_every_tool_declares_whether_it_writes() -> None:
+    """Clients use these hints to ask the user before a write; write tools must not look read-only."""
+    from fastmcp import Client
+
+    async with Client(create_server()) as client:
+        tools = {tool.name: tool.annotations for tool in await client.list_tools()}
+    for name, hints in tools.items():
+        assert hints is not None, f"{name} has no annotations"
+        assert hints.read_only_hint is (name not in WRITE_TOOLS), f"{name} readOnlyHint is wrong"
+        if name in WRITE_TOOLS:
+            assert hints.destructive_hint is not None, f"{name} must set destructiveHint"

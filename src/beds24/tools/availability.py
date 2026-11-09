@@ -12,6 +12,7 @@ from typing import Any
 
 from fastmcp import FastMCP
 
+from src.beds24.client import get_all_pages
 from src.logger import get_logger
 
 logger = get_logger(__name__)
@@ -20,7 +21,7 @@ logger = get_logger(__name__)
 def register_availability_tools(mcp: FastMCP) -> None:
     """Register all availability tools with FastMCP."""
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
     async def check_availability(
         property_id: int,
         check_in: str,
@@ -97,7 +98,15 @@ def register_availability_tools(mcp: FastMCP) -> None:
                 api_params["roomId"] = room_id
 
             # Call API: GET /inventory/rooms/offers
-            api_response = await client.get("/inventory/rooms/offers", api_params)
+            api_response = await get_all_pages(client, "/inventory/rooms/offers", api_params)
+            # A failed request is not "no availability": report it and cache nothing.
+            if not api_response.get("success"):
+                return {
+                    "success": False,
+                    "error": f"Beds24 returned an error: {api_response.get('error') or api_response}",
+                }
+
+            truncated = bool(isinstance(api_response, dict) and api_response.get("truncated"))
 
             # Extract available rooms from response
             available_rooms = []
@@ -129,8 +138,9 @@ def register_availability_tools(mcp: FastMCP) -> None:
                         ],
                     })
 
-            # Cache the results (10min TTL)
-            cache.cache_availability(cache_key, available_rooms)
+            # Cache the results (10min TTL), but never a partial list
+            if not truncated:
+                cache.cache_availability(cache_key, available_rooms)
 
             logger.info(
                 "check_availability succeeded",
@@ -146,7 +156,7 @@ def register_availability_tools(mcp: FastMCP) -> None:
                     "available": len(available_rooms) > 0,
                     "rooms": available_rooms,
                 },
-                "metadata": {"cache": "miss", "ttl_seconds": 600},
+                "metadata": {"cache": "miss", "ttl_seconds": 600, "truncated": truncated},
             }
 
         except Exception as e:
@@ -162,7 +172,7 @@ def register_availability_tools(mcp: FastMCP) -> None:
                 "error": f"Failed to check availability: {str(e)}",
             }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
     async def get_best_price(
         property_id: int,
         check_in: str,
@@ -229,7 +239,15 @@ def register_availability_tools(mcp: FastMCP) -> None:
             }
 
             # Call API: GET /inventory/rooms/offers
-            api_response = await client.get("/inventory/rooms/offers", api_params)
+            api_response = await get_all_pages(client, "/inventory/rooms/offers", api_params)
+            # A failed request is not "no availability": report it and cache nothing.
+            if not api_response.get("success"):
+                return {
+                    "success": False,
+                    "error": f"Beds24 returned an error: {api_response.get('error') or api_response}",
+                }
+
+            truncated = bool(isinstance(api_response, dict) and api_response.get("truncated"))
 
             # Extract rooms from response
             if isinstance(api_response, dict):
@@ -265,8 +283,9 @@ def register_availability_tools(mcp: FastMCP) -> None:
                             "max_stay": offer.get("maxStay"),
                         }
 
-            # Cache the result (10min TTL)
-            cache.cache_availability(cache_key, best_price_info)
+            # Cache the result (10min TTL), but never one from a partial list
+            if not truncated:
+                cache.cache_availability(cache_key, best_price_info)
 
             if best_price_info:
                 logger.info(
@@ -279,7 +298,7 @@ def register_availability_tools(mcp: FastMCP) -> None:
                 return {
                     "success": True,
                     "data": best_price_info,
-                    "metadata": {"cache": "miss", "ttl_seconds": 600},
+                    "metadata": {"cache": "miss", "ttl_seconds": 600, "truncated": truncated},
                 }
             else:
                 logger.info(
@@ -293,6 +312,7 @@ def register_availability_tools(mcp: FastMCP) -> None:
                         "cache": "miss",
                         "ttl_seconds": 600,
                         "reason": "No availability for dates",
+                        "truncated": truncated,
                     },
                 }
 

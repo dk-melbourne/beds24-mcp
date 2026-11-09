@@ -24,10 +24,14 @@ class FakeBeds24Client:
     def __init__(self) -> None:
         self.requests: list[dict[str, Any]] = []
         self.get_reply: Any = {"success": True, "data": []}
+        # If set, each GET returns the next reply in this list (e.g. one per page).
+        self.get_replies: list[Any] = []
         self.post_reply: Any = POST_OK
 
     async def get(self, endpoint: str, params: dict[str, Any] | None = None) -> Any:
         self.requests.append({"method": "get", "endpoint": endpoint, "params": params or {}})
+        if self.get_replies:
+            return self.get_replies.pop(0)
         return self.get_reply
 
     async def post(self, endpoint: str, json: Any = None) -> Any:
@@ -79,6 +83,7 @@ TOOL_ARGS: dict[str, dict[str, Any]] = {
         "arrival_from": "2027-03-01", "arrival_to": "2027-03-31",
         "departure_from": "2027-03-01", "departure_to": "2027-03-31",
         "property_id": 267799, "room_id": 560912, "status": "confirmed", "search_string": "Smith",
+        "modified_from": "2027-01-01T00:00:00", "modified_to": "2027-03-01T12:30:00",
     },
     "get_booking": {"booking_id": 111},
     "search_bookings": {"search_string": "Smith", "property_id": 267799},
@@ -87,18 +92,31 @@ TOOL_ARGS: dict[str, dict[str, Any]] = {
         "departure_from": "2027-03-01", "departure_to": "2027-03-02", "property_id": 267799,
     },
     "create_booking": {
-        **ROOM, "status": "confirmed", "arrival": "2027-03-01", "departure": "2027-03-03",
+        "room_id": 560912, "status": "confirmed", "arrival": "2027-03-01", "departure": "2027-03-03",
         "num_adult": 2, "first_name": "Test", "last_name": "Guest", "email": "guest@example.com",
         "num_child": 1, "title": "Mr", "mobile": "0400000000", "phone": "0390000000",
         "address": "1 Test St", "city": "Melbourne", "state": "VIC", "postcode": "3000",
-        "country": "AU", "channel": "direct", "api_reference": "REF1", "comment": "test",
+        "country": "AU", "comment": "test",
     },
     "get_messages": {"booking_id": 111, "unread_only": True, "date_from": "2027-03-01"},
     "get_unread_messages": {},
-    "send_message": {"booking_id": 111, "message": "Hello", "subject": "Welcome"},
+    "send_message": {"booking_id": 111, "message": "Hello"},
     "add_internal_note": {"booking_id": 111, "note": "Late check-in"},
+    # Messages, reviews and invoices
+    "mark_messages_read": {"message_ids": [11]},
+    "get_reviews": {"channel": "booking", "property_id": 267799, "from_date": "2027-01-01"},
+    "get_invoices": {"booking_id": 111},
+    # Bookings
+    "update_booking": {
+        "booking_id": 111, "arrival": "2027-03-02", "departure": "2027-03-04", "num_adult": 2,
+        "num_child": 1, "arrival_time": "15:00", "first_name": "New", "last_name": "Name",
+        "email": "new@example.com", "phone": "0390000000", "mobile": "0400000000",
+        "notes": "replaced", "flag_color": "ff0000", "flag_text": "VIP",
+    },
+    "cancel_booking": {"booking_id": 111},
 }
 WRITE_TOOLS = [
     "update_pricing", "set_availability", "block_dates",
     "create_booking", "send_message", "add_internal_note",
+    "mark_messages_read", "update_booking", "cancel_booking",
 ]

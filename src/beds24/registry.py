@@ -2,16 +2,18 @@
 Beds24 Tool Registration
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-Registers all 18 Beds24 MCP tools with the FastMCP server.
+Registers all 23 Beds24 MCP tools with the FastMCP server.
 
 Tools organized by domain:
-- Bookings: 6 tools (get, list, arrivals, departures, create, search)
+- Bookings: 8 tools (get, list, arrivals, departures, create, search, update, cancel)
 - Properties: 2 tools (list, rooms)
 - Availability: 2 tools (check, best price)
-- Messages: 4 tools (list, unread, send, add note)
+- Messages: 5 tools (list, unread, send, add note, mark read)
 - Calendar: 4 tools (get, update pricing, set availability, block dates)
+- Reviews: 1 tool (Airbnb / Booking.com reviews)
+- Invoices: 1 tool (invoices for a booking)
 
-Total: 18 tools across 5 modules
+Total: 23 tools across 7 modules
 """
 
 from typing import TYPE_CHECKING, Any
@@ -51,13 +53,13 @@ def register_beds24_tools(mcp: "FastMCP", resources: Any) -> None:
 
     tool_count = 0
 
-    # Register Bookings tools (6 tools)
+    # Register Bookings tools (8 tools)
     try:
         from src.beds24.tools.bookings import register_booking_tools
 
         register_booking_tools(mcp)
-        tool_count += 6
-        logger.info("Registered 6 booking tools")
+        tool_count += 8
+        logger.info("Registered 8 booking tools")
     except ImportError as e:
         logger.error(f"Failed to import booking tools: {e}")
         raise
@@ -93,13 +95,13 @@ def register_beds24_tools(mcp: "FastMCP", resources: Any) -> None:
         logger.error(f"Error registering availability tools: {e}")
         raise
 
-    # Register Message tools (4 tools)
+    # Register Message tools (5 tools)
     try:
         from src.beds24.tools.messages import register_message_tools
 
         register_message_tools(mcp)
-        tool_count += 4
-        logger.info("Registered 4 message tools")
+        tool_count += 5
+        logger.info("Registered 5 message tools")
     except ImportError as e:
         logger.error(f"Failed to import message tools: {e}")
         raise
@@ -119,6 +121,34 @@ def register_beds24_tools(mcp: "FastMCP", resources: Any) -> None:
         raise
     except Exception as e:
         logger.error(f"Error registering calendar tools: {e}")
+        raise
+
+    # Register Review tools (1 tool)
+    try:
+        from src.beds24.tools.reviews import register_review_tools
+
+        register_review_tools(mcp)
+        tool_count += 1
+        logger.info("Registered 1 review tool")
+    except ImportError as e:
+        logger.error(f"Failed to import review tools: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Error registering review tools: {e}")
+        raise
+
+    # Register Invoice tools (1 tool)
+    try:
+        from src.beds24.tools.invoices import register_invoice_tools
+
+        register_invoice_tools(mcp)
+        tool_count += 1
+        logger.info("Registered 1 invoice tool")
+    except ImportError as e:
+        logger.error(f"Failed to import invoice tools: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Error registering invoice tools: {e}")
         raise
 
     logger.info(f"Successfully registered all {tool_count} Beds24 tools")
