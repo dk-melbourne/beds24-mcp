@@ -13,6 +13,7 @@ from typing import Any
 
 from fastmcp import FastMCP
 
+from src.beds24.client import get_all_pages
 from src.logger import get_logger
 
 logger = get_logger(__name__)
@@ -21,7 +22,7 @@ logger = get_logger(__name__)
 def register_calendar_tools(mcp: FastMCP) -> None:
     """Register all calendar tools with FastMCP."""
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
     async def get_calendar(
         property_id: int,
         date_from: str,
@@ -32,12 +33,13 @@ def register_calendar_tools(mcp: FastMCP) -> None:
         Get calendar data for property/room.
 
         Retrieves calendar data including pricing and availability for a date range.
-        Results are cached for 15 minutes.
+        Results are cached for 15 minutes. If metadata.truncated is true, the range
+        had more pages than were read; ask for a shorter date range.
 
         Args:
             property_id: The property ID to get calendar for
             date_from: Start date in YYYY-MM-DD format
-            date_to: End date in YYYY-MM-DD format
+            date_to: Last date in YYYY-MM-DD format (inclusive)
             room_id: Specific room ID (optional, gets all rooms if not specified)
 
         Returns:
@@ -77,7 +79,11 @@ def register_calendar_tools(mcp: FastMCP) -> None:
                 return {
                     "success": True,
                     "data": cached_data,
-                    "metadata": {"source": "cache", "cache_key": cache_key},
+                    "metadata": {
+                        "source": "cache",
+                        "cache_key": cache_key,
+                        "truncated": False,
+                    },
                 }
 
             # Cache miss - fetch from API
@@ -93,10 +99,11 @@ def register_calendar_tools(mcp: FastMCP) -> None:
             if room_id:
                 endpoint_params["roomId"] = room_id
 
-            response_data = await client.get("/inventory/rooms/calendar", endpoint_params)
+            response_data = await get_all_pages(client, "/inventory/rooms/calendar", endpoint_params)
 
-            # Cache the result
-            cache.cache_calendar(cache_key, response_data)
+            # Cache the result, but never a partial one
+            if not response_data["truncated"]:
+                cache.cache_calendar(cache_key, response_data)
 
             logger.info(
                 "Calendar data retrieved from API",
@@ -111,7 +118,11 @@ def register_calendar_tools(mcp: FastMCP) -> None:
             return {
                 "success": True,
                 "data": response_data,
-                "metadata": {"source": "api", "cache_key": cache_key},
+                "metadata": {
+                    "source": "api",
+                    "cache_key": cache_key,
+                    "truncated": response_data["truncated"],
+                },
             }
 
         except Exception as e:
@@ -170,7 +181,9 @@ def register_calendar_tools(mcp: FastMCP) -> None:
                 "metadata": {"error_type": type(e).__name__},
             }
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": True}
+    )
     async def update_pricing(
         property_id: int,
         room_id: int,
@@ -183,6 +196,8 @@ def register_calendar_tools(mcp: FastMCP) -> None:
 
         Sets the calendar price (price1) for a room on every night from date_from
         to date_to, inclusive. Reports success only if Beds24 confirms the change.
+        Prices are managed by PriceLabs, which will overwrite a manual price on its
+        next sync, so only use this when the user explicitly asks for it.
 
         Args:
             property_id: The property ID containing the room
@@ -199,7 +214,9 @@ def register_calendar_tools(mcp: FastMCP) -> None:
             {"price1": price}, {"property_id": property_id, "price": price},
         )
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": True}
+    )
     async def set_availability(
         property_id: int,
         room_id: int,
@@ -228,7 +245,9 @@ def register_calendar_tools(mcp: FastMCP) -> None:
             {"numAvail": available}, {"property_id": property_id, "available": available},
         )
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": True}
+    )
     async def block_dates(
         property_id: int,
         room_id: int,

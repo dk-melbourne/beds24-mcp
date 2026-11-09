@@ -170,6 +170,23 @@ async def lifespan(server: FastMCP) -> AsyncGenerator[None, None]:
 # ============================================================================
 
 
+SERVER_INSTRUCTIONS = """\
+Manage Beds24 properties, bookings, guest messages and the room calendar.
+
+IDs: a property id and a room id are different things. Get them from get_properties and get_property_rooms; never guess them.
+
+Dates are YYYY-MM-DD. Calendar date ranges (get_calendar, update_pricing, set_availability, block_dates) include date_to. For stays, check_out is the departure day.
+
+Prices are managed by PriceLabs, which pushes prices and stay restrictions into Beds24 every night and overwrites manual price changes on its next sync. Prefer reading prices (get_calendar, get_best_price, check_availability). Only use update_pricing when the user explicitly asks for it.
+
+Confirm with the user before any write: messages to guests, creating or updating bookings (create_booking, update_booking), cancelling, and calendar changes. A write is only done if the tool returns success.
+
+Bookings are cancelled with cancel_booking, never deleted. Use get_bookings with modified_from to see what changed since a given time. Other tools: mark_messages_read, get_reviews, get_invoices.
+
+List results may be cut off. Check the truncated flag in the result or metadata, and narrow the query if it is true.
+"""
+
+
 def create_server() -> FastMCP:
     """
     Create and configure the FastMCP server with middleware and tool registration.
@@ -183,7 +200,7 @@ def create_server() -> FastMCP:
     mcp = FastMCP(
         name="beds24",
         version="1.0.0",
-        instructions="Beds24 MCP Server",
+        instructions=SERVER_INSTRUCTIONS,
         lifespan=lifespan,  # This ensures resources.initialize() runs on startup
     )
 
