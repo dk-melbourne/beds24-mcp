@@ -79,7 +79,6 @@ KNOWN_MISMATCHES: dict[str, str] = {
         "sends propertyId, channel, apiReference and comment, which the POST /bookings schema "
         "does not define (Beds24's own example does use comment)"
     ),
-    "send_message": "sends subject, which POST /bookings/messages does not define",
 }
 
 
