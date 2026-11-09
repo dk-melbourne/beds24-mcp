@@ -24,10 +24,14 @@ class FakeBeds24Client:
     def __init__(self) -> None:
         self.requests: list[dict[str, Any]] = []
         self.get_reply: Any = {"success": True, "data": []}
+        # If set, each GET returns the next reply in this list (e.g. one per page).
+        self.get_replies: list[Any] = []
         self.post_reply: Any = POST_OK
 
     async def get(self, endpoint: str, params: dict[str, Any] | None = None) -> Any:
         self.requests.append({"method": "get", "endpoint": endpoint, "params": params or {}})
+        if self.get_replies:
+            return self.get_replies.pop(0)
         return self.get_reply
 
     async def post(self, endpoint: str, json: Any = None) -> Any:

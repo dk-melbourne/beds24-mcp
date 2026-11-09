@@ -52,6 +52,25 @@ def confirmed_post_item(response: Any) -> dict[str, Any] | None:
     return None
 
 
+async def get_all_pages(
+    client: Any, endpoint: str, params: dict[str, Any] | None = None, max_pages: int = 10
+) -> dict[str, Any]:
+    """GET every page of a Beds24 list endpoint and combine the "data" lists.
+
+    Each page is a separate request (and costs API credits), so stops after max_pages.
+    The result keeps Beds24's response shape, with "data" holding all rows, "count" their
+    number, and "truncated" True if more pages existed than were read.
+    """
+    rows: list[Any] = []
+    response: dict[str, Any] = {}
+    for page in range(1, max_pages + 1):
+        response = await client.get(endpoint, {**(params or {}), "page": page})
+        rows.extend(response.get("data") or [])
+        if not (response.get("pages") or {}).get("nextPageExists"):
+            return {**response, "data": rows, "count": len(rows), "truncated": False}
+    return {**response, "data": rows, "count": len(rows), "truncated": True}
+
+
 class QueuedRequest(Generic[T]):
     """Represents a queued API request with future for result."""
 
