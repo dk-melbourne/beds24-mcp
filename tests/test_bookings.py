@@ -10,7 +10,7 @@ import src.server as server
 
 READ_TOOLS = ["get_bookings", "get_booking", "get_arrivals", "get_departures", "search_bookings"]
 PAGED_TOOLS = ["get_bookings", "get_arrivals", "get_departures", "search_bookings"]
-BOOKING_WRITES = {"create_booking": (False, False), "update_booking": (True, False), "cancel_booking": (True, True)}
+BOOKING_WRITES = {"create_booking": (False, False), "update_booking": (True, True), "cancel_booking": (True, True)}
 
 
 def page(rows: list[Any], more: bool) -> dict[str, Any]:
@@ -149,3 +149,45 @@ async def test_booking_writes_clear_cached_calendar_and_availability(
     result = await call(mcp, tool, TOOL_ARGS[tool])
     assert result["success"] is True
     assert set(cleared) == {"invalidate_bookings", "invalidate_calendar", "invalidate_availability"}
+
+
+# --- review fixes -------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("field", ["first_name", "email", "last_name"])
+async def test_update_booking_refuses_to_blank_guest_details(mcp: Any, beds24: Any, field: str) -> None:
+    result = await call(mcp, "update_booking", {"booking_id": 111, field: ""})
+    assert result["success"] is False
+    assert beds24.requests == []
+
+
+async def test_update_booking_compares_dates_not_strings(mcp: Any, beds24: Any) -> None:
+    # As strings "2027-3-10" < "2027-3-9", but as dates the stay is valid.
+    result = await call(mcp, "update_booking", {"booking_id": 111, "arrival": "2027-3-9", "departure": "2027-3-10"})
+    assert result["success"] is True
+
+
+@pytest.fixture
+def real_cache(monkeypatch: pytest.MonkeyPatch, beds24: Any) -> None:
+    from src.beds24.cache import CacheManager
+
+    monkeypatch.setattr(server.resources, "cache_manager", CacheManager(enabled=True))
+
+
+async def test_truncated_bookings_are_not_cached(mcp: Any, beds24: Any, real_cache: None) -> None:
+    beds24.get_reply = page([{"id": 1}], True)  # every page says more exist -> truncated
+    for _ in range(2):
+        result = await call(mcp, "get_bookings", {"status": "confirmed"})
+        assert result["metadata"]["truncated"] is True
+    calls = len(beds24.requests)
+    assert calls == 20  # two full, uncached reads of 10 pages each
+
+
+async def test_modified_from_is_part_of_the_cache_key(mcp: Any, beds24: Any, real_cache: None) -> None:
+    beds24.get_reply = page([{"id": 1}], False)
+    await call(mcp, "get_bookings", {"modified_from": "2027-01-01T00:00:00"})
+    await call(mcp, "get_bookings", {"modified_from": "2027-02-01T00:00:00"})
+    await call(mcp, "get_bookings", {"modified_from": "2027-02-01T00:00:00"})  # cache hit
+    assert [r["params"]["modifiedFrom"] for r in beds24.requests] == [
+        "2027-01-01T00:00:00", "2027-02-01T00:00:00",
+    ]

@@ -67,9 +67,13 @@ def register_booking_tools(mcp: FastMCP) -> None:
             departure_to: Filter by departure date to (YYYY-MM-DD)
             property_id: Filter by property ID
             room_id: Filter by room ID
-            status: Filter by booking status (confirmed, new, cancelled, etc.)
+            status: Filter by booking status (confirmed, request, new, cancelled, black,
+                inquiry). If omitted, Beds24 returns all statuses except cancelled.
             search_string: Search in guest name, email, reference
-            modified_from: Only bookings modified after this time (YYYY-MM-DDTHH:MM:SS)
+            modified_from: Only bookings modified after this time (YYYY-MM-DDTHH:MM:SS).
+                Beds24 still applies its default status filter (confirmed, request, new,
+                black, inquiry), so cancellations are left out unless you also pass
+                status="cancelled" in a second call.
             modified_to: Only bookings modified before this time (YYYY-MM-DDTHH:MM:SS)
 
         Returns:
@@ -672,7 +676,7 @@ def register_booking_tools(mcp: FastMCP) -> None:
         annotations={
             "readOnlyHint": False,
             "destructiveHint": True,
-            "idempotentHint": False,
+            "idempotentHint": True,
             "openWorldHint": True,
         }
     )
@@ -697,8 +701,11 @@ def register_booking_tools(mcp: FastMCP) -> None:
 
         WARNING: notes REPLACES the existing booking notes (it does not append). To add
         a note without losing the old ones, use add_internal_note instead. Changing
-        arrival or departure changes the stay and may affect availability. This cannot
-        change the booking status; use cancel_booking to cancel. Invalidates booking caches.
+        arrival or departure changes the stay and may affect availability; Beds24 does not
+        check availability first. For Airbnb, Booking.com and other channel bookings,
+        changes here are NOT sent to the channel, so change dates or guest details on the
+        channel instead unless the booking is direct. This cannot change the booking
+        status; use cancel_booking to cancel. Invalidates booking caches.
 
         Args:
             booking_id: Beds24 booking ID - REQUIRED
@@ -740,6 +747,11 @@ def register_booking_tools(mcp: FastMCP) -> None:
             changes = {k: v for k, v in fields.items() if v is not None}
             if not changes:
                 return {"success": False, "error": "Provide at least one field to change"}
+            # An empty string would blank the field in Beds24; only allow it where clearing
+            # is meaningful.
+            blanked = [k for k, v in changes.items() if v == "" and k not in ("notes", "flagColor", "flagText")]
+            if blanked:
+                return {"success": False, "error": f"Empty values would erase these fields: {blanked}"}
 
             for label in ("arrival", "departure"):
                 if label in changes:
@@ -751,7 +763,8 @@ def register_booking_tools(mcp: FastMCP) -> None:
                             "error": f"Invalid date format. Expected YYYY-MM-DD: {str(e)}",
                         }
             if "arrival" in changes and "departure" in changes:
-                if changes["arrival"] >= changes["departure"]:
+                parse = lambda d: datetime.strptime(d, "%Y-%m-%d")  # noqa: E731
+                if parse(changes["arrival"]) >= parse(changes["departure"]):
                     return {
                         "success": False,
                         "error": "Arrival date must be before departure date",
@@ -806,8 +819,9 @@ def register_booking_tools(mcp: FastMCP) -> None:
         """
         Cancel a booking by setting its status to "cancelled".
 
-        Beds24 never deletes bookings this way: the booking stays visible with status
-        cancelled, and its dates become available again. No reason is recorded; to
+        Beds24 never deletes bookings this way: the booking is kept with status
+        cancelled (list it with get_bookings status="cancelled"), and its dates become
+        available again. No reason is recorded; to
         record one, call add_internal_note. Invalidates booking caches.
 
         Args:

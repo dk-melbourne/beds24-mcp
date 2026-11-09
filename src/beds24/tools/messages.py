@@ -48,7 +48,9 @@ def register_message_tools(mcp: FastMCP) -> None:
         Args:
             booking_id: Filter by specific booking ID (optional)
             unread_only: Only return unread messages (default False)
-            date_from: Only return messages from this date onward (YYYY-MM-DD format)
+            date_from: Only return messages from roughly this date onward (YYYY-MM-DD).
+                Beds24 filters by whole days back from today: at least the last day,
+                at most 999 days.
 
         Returns:
             List of message objects with booking, sender, and content information.
@@ -71,7 +73,7 @@ def register_message_tools(mcp: FastMCP) -> None:
 
             if date_from:
                 from_date = datetime.fromisoformat(date_from.split("T")[0]).date()
-                query_params["maxAge"] = max((datetime.now().date() - from_date).days, 1)
+                query_params["maxAge"] = min(max((datetime.now().date() - from_date).days, 1), 999)
 
             # Get messages from API (not cached - real-time required)
             response = await get_all_pages(client, "/bookings/messages", query_params)

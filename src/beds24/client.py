@@ -58,6 +58,7 @@ async def get_all_pages(
     """GET every page of a Beds24 list endpoint and combine the "data" lists.
 
     Each page is a separate request (and costs API credits), so stops after max_pages.
+    If any page fails, that page's reply is returned instead, so errors are never hidden.
     The result keeps Beds24's response shape, with "data" holding all rows, "count" their
     number, and "truncated" True if more pages existed than were read.
     """
@@ -65,7 +66,14 @@ async def get_all_pages(
     response: dict[str, Any] = {}
     for page in range(1, max_pages + 1):
         response = await client.get(endpoint, {**(params or {}), "page": page})
-        rows.extend(response.get("data") or [])
+        # Any failed or malformed page: return it as is (callers check "success"), never
+        # partial rows that look complete.
+        if not isinstance(response, dict) or response.get("success") is not True:
+            return response if isinstance(response, dict) else {"success": False, "error": str(response)}
+        data = response.get("data") or []
+        if not isinstance(data, list):
+            return {"success": False, "error": f"Unexpected data on page {page}: {data!r}"}
+        rows.extend(data)
         if not (response.get("pages") or {}).get("nextPageExists"):
             return {**response, "data": rows, "count": len(rows), "truncated": False}
     return {**response, "data": rows, "count": len(rows), "truncated": True}
@@ -381,8 +389,11 @@ class Beds24Client:
         except httpx.HTTPError as e:
             logger.error(f"Network error during {method} {endpoint}: {e}")
 
-            # Retry on network errors
-            if retry_count < self.MAX_RETRIES:
+            # Retry on network errors. A write (non-GET) is only retried if it never reached
+            # Beds24 (connection failed); after e.g. a read timeout Beds24 may already have
+            # saved it, and retrying could send a guest message or booking twice.
+            never_sent = isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout))
+            if retry_count < self.MAX_RETRIES and (method == "GET" or never_sent):
                 backoff_delay = 5 * (2**retry_count)
                 logger.warning(f"Network error, retrying in {backoff_delay}s")
                 await asyncio.sleep(backoff_delay)

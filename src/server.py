@@ -181,7 +181,7 @@ Prices are managed by PriceLabs, which regularly pushes prices and stay restrict
 
 Confirm with the user before any write: messages to guests, creating or updating bookings (create_booking, update_booking), cancelling, and calendar changes. A write is only done if the tool returns success.
 
-Bookings are cancelled with cancel_booking, never deleted. Use get_bookings with modified_from to see what changed since a given time. Other tools: mark_messages_read, get_reviews, get_invoices.
+Bookings are cancelled with cancel_booking, never deleted. Use get_bookings with modified_from to see what changed since a given time; cancellations only appear with status="cancelled". Changes to channel bookings (Airbnb, Booking.com) made here are not sent to the channel. Other tools: mark_messages_read, get_reviews, get_invoices.
 
 List results may be cut off. Check the truncated flag in the result or metadata, and narrow the query if it is true.
 """
