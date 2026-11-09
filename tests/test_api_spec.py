@@ -75,10 +75,11 @@ def operation(spec: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
 # Mismatches with the spec that are known and not yet fixed. Each one fails the test if it gets fixed,
 # so this list has to be kept up to date.
 KNOWN_MISMATCHES: dict[str, str] = {
-    "create_booking": (
-        "sends propertyId, channel, apiReference and comment, which the POST /bookings schema "
-        "does not define (Beds24's own example does use comment)"
-    ),
+    # The spec's POST /bookings schema marks roomId etc. required, but that applies to NEW bookings;
+    # existing bookings are changed by sending "id" plus only the fields to change. Field names for
+    # these two are checked against the spec in tests/test_bookings.py instead.
+    "update_booking": "partial update by id; schema's required fields only apply to new bookings",
+    "cancel_booking": "partial update by id; schema's required fields only apply to new bookings",
     "send_message": "sends subject, which POST /bookings/messages does not define",
 }
 

@@ -5,7 +5,7 @@ Beds24 Tool Registration
 Registers all 18 Beds24 MCP tools with the FastMCP server.
 
 Tools organized by domain:
-- Bookings: 6 tools (get, list, arrivals, departures, create, search)
+- Bookings: 8 tools (get, list, arrivals, departures, create, search, update, cancel)
 - Properties: 2 tools (list, rooms)
 - Availability: 2 tools (check, best price)
 - Messages: 4 tools (list, unread, send, add note)
@@ -51,13 +51,13 @@ def register_beds24_tools(mcp: "FastMCP", resources: Any) -> None:
 
     tool_count = 0
 
-    # Register Bookings tools (6 tools)
+    # Register Bookings tools (8 tools)
     try:
         from src.beds24.tools.bookings import register_booking_tools
 
         register_booking_tools(mcp)
         tool_count += 6
-        logger.info("Registered 6 booking tools")
+        logger.info("Registered 8 booking tools")
     except ImportError as e:
         logger.error(f"Failed to import booking tools: {e}")
         raise
