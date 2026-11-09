@@ -177,7 +177,7 @@ IDs: a property id and a room id are different things. Get them from get_propert
 
 Dates are YYYY-MM-DD. Calendar date ranges (get_calendar, update_pricing, set_availability, block_dates) include date_to. For stays, check_out is the departure day.
 
-Prices are managed by PriceLabs, which pushes prices and stay restrictions into Beds24 every night and overwrites manual price changes on its next sync. Prefer reading prices (get_calendar, get_best_price, check_availability). Only use update_pricing when the user explicitly asks for it.
+Prices are managed by PriceLabs, which regularly pushes prices and stay restrictions into Beds24 and overwrites manual price changes on its next sync. Prefer reading prices (get_calendar, get_best_price, check_availability). Only use update_pricing when the user explicitly asks for it.
 
 Confirm with the user before any write: messages to guests, creating or updating bookings (create_booking, update_booking), cancelling, and calendar changes. A write is only done if the tool returns success.
 

@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from src.server import SERVER_INSTRUCTIONS, create_server
-from tests.conftest import call
+from conftest import call
 
 READS = ["get_calendar", "get_properties", "get_property_rooms", "check_availability", "get_best_price"]
 WRITES = ["update_pricing", "set_availability", "block_dates"]

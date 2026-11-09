@@ -74,12 +74,7 @@ def operation(spec: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
 
 # Mismatches with the spec that are known and not yet fixed. Each one fails the test if it gets fixed,
 # so this list has to be kept up to date.
-KNOWN_MISMATCHES: dict[str, str] = {
-    "create_booking": (
-        "sends propertyId, channel, apiReference and comment, which the POST /bookings schema "
-        "does not define (Beds24's own example does use comment)"
-    ),
-}
+KNOWN_MISMATCHES: dict[str, str] = {}
 
 
 @pytest.mark.parametrize("tool", TOOL_ARGS)
@@ -112,9 +107,17 @@ async def test_requests_match_beds24_spec(
         else:
             schema = op["requestBody"]["content"]["application/json"]["schema"]
             problems += [f"{where}: unknown body field {f!r}" for f in unknown_fields(schema, sent["body"])]
-            try:
-                jsonschema.validate(sent["body"], schema)
-            except jsonschema.ValidationError as error:
-                problems.append(f"{where}: {error.message} at {list(error.absolute_path)}")
+            item_schema = schema.get("items", {})
+            for index, item in enumerate(sent["body"]):
+                # An item with an "id" changes an existing record and sends only the fields to
+                # change, so the schema's required fields (which apply to new records) don't apply.
+                if isinstance(item, dict) and "id" in item:
+                    check = {k: v for k, v in item_schema.items() if k != "required"}
+                else:
+                    check = item_schema
+                try:
+                    jsonschema.validate(item, check)
+                except jsonschema.ValidationError as error:
+                    problems.append(f"{where}: {error.message} at {[index, *error.absolute_path]}")
 
     assert not problems, "\n".join(problems)

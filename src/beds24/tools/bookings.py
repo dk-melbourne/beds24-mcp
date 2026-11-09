@@ -2,13 +2,15 @@
 Beds24 Booking Tools
 ~~~~~~~~~~~~~~~~~~~~
 
-6 MCP tools for booking management:
+8 MCP tools for booking management:
 1. get_bookings - List bookings with date/property filters
 2. get_booking - Get single booking by ID
 3. get_arrivals - Get today's/upcoming arrivals
 4. get_departures - Get today's/upcoming departures
 5. create_booking - Create new booking
 6. search_bookings - Search by guest name/email/reference
+7. update_booking - Change details of an existing booking
+8. cancel_booking - Set an existing booking's status to cancelled
 
 Pattern: FastMCP @mcp.tool() decorator registration with access to
 resources.beds24_client and resources.cache_manager.
@@ -29,7 +31,7 @@ from typing import Any
 
 from fastmcp import FastMCP
 
-from src.beds24.client import confirmed_post_item
+from src.beds24.client import confirmed_post_item, get_all_pages
 from src.logger import get_logger
 
 logger = get_logger(__name__)
@@ -38,7 +40,7 @@ logger = get_logger(__name__)
 def register_booking_tools(mcp: FastMCP) -> None:
     """Register all booking tools with FastMCP."""
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
     async def get_bookings(
         arrival_from: str | None = None,
         arrival_to: str | None = None,
@@ -48,12 +50,15 @@ def register_booking_tools(mcp: FastMCP) -> None:
         room_id: int | None = None,
         status: str | None = None,
         search_string: str | None = None,
+        modified_from: str | None = None,
+        modified_to: str | None = None,
     ) -> dict[str, Any]:
         """
         Get list of bookings with optional filters.
 
-        Supports filtering by dates, property, room, status, and search string.
-        Results are cached for 5 minutes.
+        Supports filtering by dates, property, room, status, search string, and
+        modification time. Reads every page (up to a limit); metadata.truncated is
+        true if more bookings exist than were returned. Results are cached for 5 minutes.
 
         Args:
             arrival_from: Filter by arrival date from (YYYY-MM-DD)
@@ -64,6 +69,8 @@ def register_booking_tools(mcp: FastMCP) -> None:
             room_id: Filter by room ID
             status: Filter by booking status (confirmed, new, cancelled, etc.)
             search_string: Search in guest name, email, reference
+            modified_from: Only bookings modified after this time (YYYY-MM-DDTHH:MM:SS)
+            modified_to: Only bookings modified before this time (YYYY-MM-DDTHH:MM:SS)
 
         Returns:
             List of bookings matching filters
@@ -71,6 +78,16 @@ def register_booking_tools(mcp: FastMCP) -> None:
         from src.server import get_resources
 
         try:
+            for label, value in (("modified_from", modified_from), ("modified_to", modified_to)):
+                if value:
+                    try:
+                        datetime.strptime(value, "%Y-%m-%dT%H:%M:%S")
+                    except ValueError:
+                        return {
+                            "success": False,
+                            "error": f"Invalid {label}. Expected YYYY-MM-DDTHH:MM:SS",
+                        }
+
             resources = get_resources()
             client = resources.beds24_client
             cache = resources.cache_manager
@@ -94,6 +111,10 @@ def register_booking_tools(mcp: FastMCP) -> None:
                 query_params["status"] = status
             if search_string:
                 query_params["searchString"] = search_string
+            if modified_from:
+                query_params["modifiedFrom"] = modified_from
+            if modified_to:
+                query_params["modifiedTo"] = modified_to
 
             # Always include invoice and info items
             query_params["includeInvoiceItems"] = True
@@ -113,7 +134,7 @@ def register_booking_tools(mcp: FastMCP) -> None:
                 }
 
             # Make API request
-            response = await client.get("/bookings", query_params)
+            response = await get_all_pages(client, "/bookings", query_params)
 
             if not response.get("success"):
                 error_msg = response.get("error") or response.get("message") or "Unknown error"
@@ -124,14 +145,21 @@ def register_booking_tools(mcp: FastMCP) -> None:
                 }
 
             bookings_data = response.get("data", [])
+            truncated = bool(response.get("truncated"))
 
             # Cache the results
-            cache.cache_bookings_query(cache_key, bookings_data)
+            if not truncated:
+                cache.cache_bookings_query(cache_key, bookings_data)
 
             return {
                 "success": True,
                 "data": bookings_data,
-                "metadata": {"cached": False, "cache_key": cache_key, "count": len(bookings_data)},
+                "metadata": {
+                    "cached": False,
+                    "cache_key": cache_key,
+                    "count": len(bookings_data),
+                    "truncated": truncated,
+                },
             }
 
         except Exception as e:
@@ -141,7 +169,7 @@ def register_booking_tools(mcp: FastMCP) -> None:
                 "error": f"Unexpected error: {str(e)}",
             }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
     async def get_booking(booking_id: int) -> dict[str, Any]:
         """
         Get single booking by ID.
@@ -202,14 +230,15 @@ def register_booking_tools(mcp: FastMCP) -> None:
                 "error": f"Unexpected error: {str(e)}",
             }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
     async def get_arrivals(
         arrival_from: str, arrival_to: str, property_id: int | None = None
     ) -> dict[str, Any]:
         """
         Get bookings with arrivals in a date range.
 
-        Useful for checking today's or upcoming arrivals.
+        Useful for checking today's or upcoming arrivals. Both dates are inclusive.
+        metadata.truncated is true if more bookings exist than were returned.
 
         Args:
             arrival_from: Start date for arrival range (YYYY-MM-DD) - REQUIRED
@@ -268,7 +297,7 @@ def register_booking_tools(mcp: FastMCP) -> None:
                 }
 
             # Make API request
-            response = await client.get("/bookings", query_params)
+            response = await get_all_pages(client, "/bookings", query_params)
 
             if not response.get("success"):
                 error_msg = response.get("error") or response.get("message") or "Unknown error"
@@ -279,14 +308,16 @@ def register_booking_tools(mcp: FastMCP) -> None:
                 }
 
             arrivals = response.get("data", [])
+            truncated = bool(response.get("truncated"))
 
             # Cache results
-            cache.cache_bookings_query(cache_key, arrivals)
+            if not truncated:
+                cache.cache_bookings_query(cache_key, arrivals)
 
             return {
                 "success": True,
                 "data": arrivals,
-                "metadata": {"cached": False, "count": len(arrivals)},
+                "metadata": {"cached": False, "count": len(arrivals), "truncated": truncated},
             }
 
         except Exception as e:
@@ -296,14 +327,15 @@ def register_booking_tools(mcp: FastMCP) -> None:
                 "error": f"Unexpected error: {str(e)}",
             }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
     async def get_departures(
         departure_from: str, departure_to: str, property_id: int | None = None
     ) -> dict[str, Any]:
         """
         Get bookings with departures in a date range.
 
-        Useful for checking today's or upcoming departures.
+        Useful for checking today's or upcoming departures. Both dates are inclusive.
+        metadata.truncated is true if more bookings exist than were returned.
 
         Args:
             departure_from: Start date for departure range (YYYY-MM-DD) - REQUIRED
@@ -362,7 +394,7 @@ def register_booking_tools(mcp: FastMCP) -> None:
                 }
 
             # Make API request
-            response = await client.get("/bookings", query_params)
+            response = await get_all_pages(client, "/bookings", query_params)
 
             if not response.get("success"):
                 error_msg = response.get("error") or response.get("message") or "Unknown error"
@@ -373,14 +405,16 @@ def register_booking_tools(mcp: FastMCP) -> None:
                 }
 
             departures = response.get("data", [])
+            truncated = bool(response.get("truncated"))
 
             # Cache results
-            cache.cache_bookings_query(cache_key, departures)
+            if not truncated:
+                cache.cache_bookings_query(cache_key, departures)
 
             return {
                 "success": True,
                 "data": departures,
-                "metadata": {"cached": False, "count": len(departures)},
+                "metadata": {"cached": False, "count": len(departures), "truncated": truncated},
             }
 
         except Exception as e:
@@ -390,9 +424,15 @@ def register_booking_tools(mcp: FastMCP) -> None:
                 "error": f"Unexpected error: {str(e)}",
             }
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations={
+            "readOnlyHint": False,
+            "destructiveHint": False,
+            "idempotentHint": False,
+            "openWorldHint": True,
+        }
+    )
     async def create_booking(
-        property_id: int,
         room_id: int,
         status: str,
         arrival: str,
@@ -410,17 +450,15 @@ def register_booking_tools(mcp: FastMCP) -> None:
         state: str | None = None,
         postcode: str | None = None,
         country: str | None = None,
-        channel: str | None = None,
-        api_reference: str | None = None,
         comment: str | None = None,
     ) -> dict[str, Any]:
         """
         Create a new booking.
 
-        IMPORTANT: This operation invalidates all booking caches.
+        The room determines the property. Not idempotent: calling twice creates two
+        bookings. Invalidates all booking caches.
 
         Args:
-            property_id: Property ID - REQUIRED
             room_id: Room ID - REQUIRED
             status: Booking status (confirmed, new, etc.) - REQUIRED
             arrival: Check-in date (YYYY-MM-DD) - REQUIRED
@@ -438,9 +476,7 @@ def register_booking_tools(mcp: FastMCP) -> None:
             state: Guest state/province (optional)
             postcode: Guest postal code (optional)
             country: Guest country (optional)
-            channel: Booking channel (Direct, Airbnb, etc.) (optional)
-            api_reference: External reference/confirmation code (optional)
-            comment: Booking notes (optional)
+            comment: Booking notes, saved to the booking's notes field (optional)
 
         Returns:
             Created booking details
@@ -484,7 +520,6 @@ def register_booking_tools(mcp: FastMCP) -> None:
 
             # Build booking object
             booking_data: dict[str, Any] = {
-                "propertyId": property_id,
                 "roomId": room_id,
                 "status": status,
                 "arrival": arrival,
@@ -514,12 +549,8 @@ def register_booking_tools(mcp: FastMCP) -> None:
                 booking_data["postcode"] = postcode
             if country:
                 booking_data["country"] = country
-            if channel:
-                booking_data["channel"] = channel
-            if api_reference:
-                booking_data["apiReference"] = api_reference
             if comment:
-                booking_data["comment"] = comment
+                booking_data["notes"] = comment
 
             # Make API request (POST with array of bookings)
             response = await client.post("/bookings", [booking_data])
@@ -534,6 +565,9 @@ def register_booking_tools(mcp: FastMCP) -> None:
 
             # Invalidate all booking caches
             cache.invalidate_bookings()
+            # Booking changes free or take dates, so cached calendar/availability are stale too
+            cache.invalidate_calendar()
+            cache.invalidate_availability()
             logger.info("Invalidated booking caches after creation")
 
             return {
@@ -549,7 +583,7 @@ def register_booking_tools(mcp: FastMCP) -> None:
                 "error": f"Unexpected error: {str(e)}",
             }
 
-    @mcp.tool()
+    @mcp.tool(annotations={"readOnlyHint": True, "openWorldHint": True})
     async def search_bookings(
         search_string: str, property_id: int | None = None
     ) -> dict[str, Any]:
@@ -557,6 +591,7 @@ def register_booking_tools(mcp: FastMCP) -> None:
         Search bookings by guest name, email, or reference.
 
         Searches across booking guest names, emails, and references.
+        metadata.truncated is true if more bookings exist than were returned.
         Results are cached for 5 minutes.
 
         Args:
@@ -603,7 +638,7 @@ def register_booking_tools(mcp: FastMCP) -> None:
                 }
 
             # Make API request
-            response = await client.get("/bookings", query_params)
+            response = await get_all_pages(client, "/bookings", query_params)
 
             if not response.get("success"):
                 error_msg = response.get("error") or response.get("message") or "Unknown error"
@@ -614,14 +649,16 @@ def register_booking_tools(mcp: FastMCP) -> None:
                 }
 
             search_results = response.get("data", [])
+            truncated = bool(response.get("truncated"))
 
             # Cache results
-            cache.cache_bookings_query(cache_key, search_results)
+            if not truncated:
+                cache.cache_bookings_query(cache_key, search_results)
 
             return {
                 "success": True,
                 "data": search_results,
-                "metadata": {"cached": False, "count": len(search_results)},
+                "metadata": {"cached": False, "count": len(search_results), "truncated": truncated},
             }
 
         except Exception as e:
@@ -631,4 +668,188 @@ def register_booking_tools(mcp: FastMCP) -> None:
                 "error": f"Unexpected error: {str(e)}",
             }
 
-    logger.info("Registered 6 booking tools")
+    @mcp.tool(
+        annotations={
+            "readOnlyHint": False,
+            "destructiveHint": True,
+            "idempotentHint": False,
+            "openWorldHint": True,
+        }
+    )
+    async def update_booking(
+        booking_id: int,
+        arrival: str | None = None,
+        departure: str | None = None,
+        num_adult: int | None = None,
+        num_child: int | None = None,
+        arrival_time: str | None = None,
+        first_name: str | None = None,
+        last_name: str | None = None,
+        email: str | None = None,
+        phone: str | None = None,
+        mobile: str | None = None,
+        notes: str | None = None,
+        flag_color: str | None = None,
+        flag_text: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Change details of an existing booking. Only the fields you pass are changed.
+
+        WARNING: notes REPLACES the existing booking notes (it does not append). To add
+        a note without losing the old ones, use add_internal_note instead. Changing
+        arrival or departure changes the stay and may affect availability. This cannot
+        change the booking status; use cancel_booking to cancel. Invalidates booking caches.
+
+        Args:
+            booking_id: Beds24 booking ID - REQUIRED
+            arrival: New check-in date (YYYY-MM-DD)
+            departure: New check-out date (YYYY-MM-DD)
+            num_adult: Number of adults
+            num_child: Number of children
+            arrival_time: Expected arrival time (free text, max 100 characters)
+            first_name: Guest first name
+            last_name: Guest last name
+            email: Guest email
+            phone: Guest phone number
+            mobile: Guest mobile number
+            notes: New booking notes - REPLACES existing notes (max 2000 characters)
+            flag_color: Flag colour as 6 hex characters, or empty string to clear
+            flag_text: Flag text (max 32 characters)
+
+        Returns:
+            Beds24's result for the modified booking
+        """
+        from src.server import get_resources
+
+        try:
+            fields: dict[str, Any] = {
+                "arrival": arrival,
+                "departure": departure,
+                "numAdult": num_adult,
+                "numChild": num_child,
+                "arrivalTime": arrival_time,
+                "firstName": first_name,
+                "lastName": last_name,
+                "email": email,
+                "phone": phone,
+                "mobile": mobile,
+                "notes": notes,
+                "flagColor": flag_color,
+                "flagText": flag_text,
+            }
+            changes = {k: v for k, v in fields.items() if v is not None}
+            if not changes:
+                return {"success": False, "error": "Provide at least one field to change"}
+
+            for label in ("arrival", "departure"):
+                if label in changes:
+                    try:
+                        datetime.strptime(changes[label], "%Y-%m-%d")
+                    except ValueError as e:
+                        return {
+                            "success": False,
+                            "error": f"Invalid date format. Expected YYYY-MM-DD: {str(e)}",
+                        }
+            if "arrival" in changes and "departure" in changes:
+                if changes["arrival"] >= changes["departure"]:
+                    return {
+                        "success": False,
+                        "error": "Arrival date must be before departure date",
+                    }
+            if num_adult is not None and num_adult < 1:
+                return {"success": False, "error": "At least one adult is required"}
+            if num_child is not None and num_child < 0:
+                return {"success": False, "error": "Number of children cannot be negative"}
+
+            resources = get_resources()
+            client = resources.beds24_client
+            cache = resources.cache_manager
+
+            response = await client.post("/bookings", [{"id": booking_id, **changes}])
+
+            modified = confirmed_post_item(response)
+            if modified is None:
+                logger.error(f"Beds24 did not confirm booking update: {response}")
+                return {
+                    "success": False,
+                    "error": f"Beds24 did not confirm the booking was updated: {response}",
+                }
+
+            cache.invalidate_bookings()
+            # Booking changes free or take dates, so cached calendar/availability are stale too
+            cache.invalidate_calendar()
+            cache.invalidate_availability()
+            logger.info(f"Invalidated booking caches after updating booking {booking_id}")
+
+            return {
+                "success": True,
+                "data": modified,
+                "metadata": {"cache_invalidated": True},
+            }
+
+        except Exception as e:
+            logger.error(f"Error in update_booking: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": f"Unexpected error: {str(e)}",
+            }
+
+    @mcp.tool(
+        annotations={
+            "readOnlyHint": False,
+            "destructiveHint": True,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        }
+    )
+    async def cancel_booking(booking_id: int) -> dict[str, Any]:
+        """
+        Cancel a booking by setting its status to "cancelled".
+
+        Beds24 never deletes bookings this way: the booking stays visible with status
+        cancelled, and its dates become available again. No reason is recorded; to
+        record one, call add_internal_note. Invalidates booking caches.
+
+        Args:
+            booking_id: Beds24 booking ID - REQUIRED
+
+        Returns:
+            Beds24's result for the modified booking
+        """
+        from src.server import get_resources
+
+        try:
+            resources = get_resources()
+            client = resources.beds24_client
+            cache = resources.cache_manager
+
+            response = await client.post("/bookings", [{"id": booking_id, "status": "cancelled"}])
+
+            modified = confirmed_post_item(response)
+            if modified is None:
+                logger.error(f"Beds24 did not confirm booking cancellation: {response}")
+                return {
+                    "success": False,
+                    "error": f"Beds24 did not confirm the booking was cancelled: {response}",
+                }
+
+            cache.invalidate_bookings()
+            # Booking changes free or take dates, so cached calendar/availability are stale too
+            cache.invalidate_calendar()
+            cache.invalidate_availability()
+            logger.info(f"Invalidated booking caches after cancelling booking {booking_id}")
+
+            return {
+                "success": True,
+                "data": modified,
+                "metadata": {"cache_invalidated": True},
+            }
+
+        except Exception as e:
+            logger.error(f"Error in cancel_booking: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": f"Unexpected error: {str(e)}",
+            }
+
+    logger.info("Registered 8 booking tools")
