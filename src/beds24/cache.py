@@ -331,11 +331,11 @@ class CacheManager:
     # Availability Caching (10 minutes)
     # ============================================================================
 
-    def cache_availability(self, query_key: str, data: list[Any]) -> None:
+    def cache_availability(self, query_key: str, data: Any) -> None:
         """Cache availability/offers data."""
         self.set("availability", f"availability:{query_key}", data)
 
-    def get_availability(self, query_key: str) -> list[Any] | None:
+    def get_availability(self, query_key: str) -> Any | None:
         """Get cached availability data."""
         return self.get("availability", f"availability:{query_key}")
 

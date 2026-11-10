@@ -17,6 +17,9 @@ from src.logger import get_logger
 
 logger = get_logger(__name__)
 
+# Beds24 returns at most this many reviews per call, and these endpoints have no page parameter.
+REVIEW_LIMIT = 100
+
 
 def register_review_tools(mcp: FastMCP) -> None:
     """Register review tools with FastMCP."""
@@ -32,9 +35,10 @@ def register_review_tools(mcp: FastMCP) -> None:
         Get guest reviews from Airbnb or Booking.com.
 
         Beds24 marks the Airbnb endpoint Beta and the Booking.com endpoint Alpha,
-        so behaviour may change. Each call returns at most 100 reviews and these
-        endpoints do not page. Review fields differ between the two channels and
-        are returned as Beds24 sends them.
+        so behaviour may change. Beds24 returns at most 100 reviews per call and
+        these endpoints cannot page, so metadata.truncated is true when more may
+        exist. Review fields differ between the two channels and are returned as
+        Beds24 sends them.
 
         Args:
             channel: "airbnb" or "booking"
@@ -84,10 +88,14 @@ def register_review_tools(mcp: FastMCP) -> None:
                 }
 
             reviews = response.get("data", [])
+            more = (response.get("pages") or {}).get("nextPageExists") is True
+            truncated = more or len(reviews) >= REVIEW_LIMIT
             return {
                 "success": True,
                 "data": reviews,
-                "metadata": {"count": len(reviews), "channel": channel, "cached": False},
+                "metadata": {
+                    "count": len(reviews), "channel": channel, "cached": False, "truncated": truncated,
+                },
             }
 
         except Exception as e:
