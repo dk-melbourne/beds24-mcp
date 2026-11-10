@@ -22,6 +22,7 @@ FAILURE = BEDS24 ACCOUNT BLOCKED.
 """
 
 import asyncio
+import re
 from datetime import datetime
 from typing import Any, Callable, Generic, TypeVar
 
@@ -39,6 +40,28 @@ from src.logger import get_logger
 logger = get_logger(__name__)
 
 T = TypeVar("T")
+
+
+RATE_LIMIT_CODES = {1016, 1020}
+_RATE_LIMIT_CODE_IN_TEXT = re.compile(r"\b(?:1016|1020)\b")
+
+
+def is_rate_limited(status_code: int, error_code: Any, error_msg: str) -> bool:
+    """True if Beds24 refused the request for exceeding its usage limits.
+
+    Matches HTTP 429, an error code of 1016/1020, or 1016/1020 as a whole number in a
+    message that also mentions a limit. A booking or room id that merely contains those
+    digits is not a rate limit.
+    """
+    if status_code == 429:
+        return True
+    try:
+        if int(error_code) in RATE_LIMIT_CODES:
+            return True
+    except (TypeError, ValueError):
+        pass
+    text = str(error_msg)
+    return bool(_RATE_LIMIT_CODE_IN_TEXT.search(text)) and "limit" in text.lower()
 
 
 def confirmed_post_item(response: Any) -> dict[str, Any] | None:
@@ -340,8 +363,10 @@ class Beds24Client:
 
             # Handle errors
             error_text = response.text
+            error_code = None
             try:
                 error_json = response.json()
+                error_code = error_json.get("code")
                 error_msg = (
                     error_json.get("error")
                     or error_json.get("message")
@@ -351,7 +376,7 @@ class Beds24Client:
                 error_msg = error_text or f"Request failed with status {response.status_code}"
 
             # Check for rate limit errors (1016, 1020)
-            if "1016" in error_msg or "1020" in error_msg:
+            if is_rate_limited(response.status_code, error_code, error_msg):
                 if retry_count < self.MAX_RETRIES:
                     # Exponential backoff: 5s, 10s, 20s
                     backoff_delay = 5 * (2**retry_count)

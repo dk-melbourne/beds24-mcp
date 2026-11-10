@@ -82,7 +82,7 @@ def register_availability_tools(mcp: FastMCP) -> None:
                 return {
                     "success": True,
                     "data": cached_result,
-                    "metadata": {"cache": "hit", "ttl_seconds": 600},
+                    "metadata": {"cache": "hit", "ttl_seconds": 600, "truncated": False},
                 }
 
             # Build API parameters
@@ -138,9 +138,11 @@ def register_availability_tools(mcp: FastMCP) -> None:
                         ],
                     })
 
+            data = {"available": len(available_rooms) > 0, "rooms": available_rooms}
+
             # Cache the results (10min TTL), but never a partial list
             if not truncated:
-                cache.cache_availability(cache_key, available_rooms)
+                cache.cache_availability(cache_key, data)
 
             logger.info(
                 "check_availability succeeded",
@@ -152,10 +154,7 @@ def register_availability_tools(mcp: FastMCP) -> None:
 
             return {
                 "success": True,
-                "data": {
-                    "available": len(available_rooms) > 0,
-                    "rooms": available_rooms,
-                },
+                "data": data,
                 "metadata": {"cache": "miss", "ttl_seconds": 600, "truncated": truncated},
             }
 
@@ -226,7 +225,7 @@ def register_availability_tools(mcp: FastMCP) -> None:
                 return {
                     "success": True,
                     "data": cached_result,
-                    "metadata": {"cache": "hit", "ttl_seconds": 600},
+                    "metadata": {"cache": "hit", "ttl_seconds": 600, "truncated": False},
                 }
 
             # Build API parameters
