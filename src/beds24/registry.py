@@ -2,18 +2,18 @@
 Beds24 Tool Registration
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-Registers all 23 Beds24 MCP tools with the FastMCP server.
+Registers all 24 Beds24 MCP tools with the FastMCP server.
 
 Tools organized by domain:
 - Bookings: 8 tools (get, list, arrivals, departures, create, search, update, cancel)
 - Properties: 2 tools (list, rooms)
 - Availability: 2 tools (check, best price)
 - Messages: 5 tools (list, unread, send, add note, mark read)
-- Calendar: 4 tools (get, update pricing, set availability, block dates)
+- Calendar: 5 tools (get, update pricing, set availability, block dates, stay restrictions)
 - Reviews: 1 tool (Airbnb / Booking.com reviews)
 - Invoices: 1 tool (invoices for a booking)
 
-Total: 23 tools across 7 modules
+Total: 24 tools across 7 modules
 """
 
 from typing import TYPE_CHECKING, Any
@@ -109,13 +109,13 @@ def register_beds24_tools(mcp: "FastMCP", resources: Any) -> None:
         logger.error(f"Error registering message tools: {e}")
         raise
 
-    # Register Calendar tools (4 tools)
+    # Register Calendar tools (5 tools)
     try:
         from src.beds24.tools.calendar import register_calendar_tools
 
         register_calendar_tools(mcp)
-        tool_count += 4
-        logger.info("Registered 4 calendar tools")
+        tool_count += 5
+        logger.info("Registered 5 calendar tools")
     except ImportError as e:
         logger.error(f"Failed to import calendar tools: {e}")
         raise

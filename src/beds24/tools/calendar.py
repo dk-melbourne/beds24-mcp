@@ -2,14 +2,17 @@
 Beds24 Calendar Tools
 ~~~~~~~~~~~~~~~~~~~~~
 
-4 MCP tools for calendar management:
+5 MCP tools for calendar management:
 1. get_calendar - Get calendar data for property/room
 2. update_pricing - Update room pricing for date range
 3. set_availability - Set room availability for date range
 4. block_dates - Block dates for a room
+5. set_stay_restrictions - Set minimum/maximum stay and date overrides for a room
 """
 
-from typing import Any
+from datetime import date, datetime
+from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 from fastmcp import FastMCP
 
@@ -17,6 +20,47 @@ from src.beds24.client import get_all_pages
 from src.logger import get_logger
 
 logger = get_logger(__name__)
+
+# The properties are in Melbourne; the server runs in UTC, where "today" can be a day behind.
+PROPERTY_TIMEZONE = ZoneInfo("Australia/Melbourne")
+
+# Limits and override values from Beds24's calendar schema.
+MAX_MIN_STAY = 365
+MAX_MAX_STAY = 364
+BEDS24_OVERRIDES = {
+    "blackout": "blackout",
+    "no_checkin": "noCheckIn",
+    "no_checkout": "noCheckOut",
+    "no_checkin_or_checkout": "noCheckInOrCheckOut",
+    "exception": "exception",
+    "none": "none",
+}
+
+
+def stay_restriction_problem(
+    date_from: str, date_to: str, min_stay: int | None, max_stay: int | None, override: str | None
+) -> str | None:
+    """Why a set_stay_restrictions request is invalid, or None if it is fine."""
+    if min_stay is None and max_stay is None and override is None:
+        return "Nothing to change: give at least one of min_stay, max_stay or override"
+    for name, value in (("date_from", date_from), ("date_to", date_to)):
+        try:
+            valid = date.fromisoformat(value).isoformat() == value
+        except ValueError:
+            valid = False
+        if not valid:
+            return f"{name} must be a date in YYYY-MM-DD format"
+    if date_from > date_to:
+        return "date_from must not be after date_to"
+    if date_from < datetime.now(PROPERTY_TIMEZONE).date().isoformat():
+        return "date_from must not be in the past"
+    if min_stay is not None and not 1 <= min_stay <= MAX_MIN_STAY:
+        return f"min_stay must be from 1 to {MAX_MIN_STAY}"
+    if max_stay is not None and not 1 <= max_stay <= MAX_MAX_STAY:
+        return f"max_stay must be from 1 to {MAX_MAX_STAY}"
+    if min_stay is not None and max_stay is not None and min_stay > max_stay:
+        return "min_stay must not be more than max_stay"
+    return None
 
 
 def register_calendar_tools(mcp: FastMCP) -> None:
@@ -32,8 +76,9 @@ def register_calendar_tools(mcp: FastMCP) -> None:
         """
         Get calendar data for property/room.
 
-        Retrieves calendar data including pricing and availability for a date range.
-        Results are cached for 15 minutes. If metadata.truncated is true, the range
+        Retrieves calendar data for a date range: price, availability, minStay, maxStay
+        and override. minStay and maxStay fall back to the room's own setting when none
+        is set on the date. Results are cached for 15 minutes. If metadata.truncated is true, the range
         had more pages than were read; ask for a shorter date range.
 
         Args:
@@ -43,7 +88,7 @@ def register_calendar_tools(mcp: FastMCP) -> None:
             room_id: Specific room ID (optional, gets all rooms if not specified)
 
         Returns:
-            Calendar data with pricing and availability information
+            Calendar data with pricing, availability and stay restrictions
         """
         from src.server import get_resources
         from datetime import datetime
@@ -93,6 +138,8 @@ def register_calendar_tools(mcp: FastMCP) -> None:
                 "endDate": date_to,
                 "includeNumAvail": "true",
                 "includeMinStay": "true",
+                "includeMaxStay": "true",
+                "includeOverride": "true",
                 "includePrices": "true",
             }
 
@@ -264,7 +311,8 @@ def register_calendar_tools(mcp: FastMCP) -> None:
         Block dates for a room (set availability to 0).
 
         Sets availability to 0 for every night from date_from to date_to,
-        inclusive. Reports success only if Beds24 confirms.
+        inclusive. Reports success only if Beds24 confirms. Beds24's documented way to
+        fully close dates is override="blackout" with set_stay_restrictions.
 
         Args:
             property_id: The property ID containing the room
@@ -281,4 +329,80 @@ def register_calendar_tools(mcp: FastMCP) -> None:
             {"numAvail": 0}, {"property_id": property_id, "blocked": True, "reason": reason},
         )
 
-    logger.info("Registered 4 calendar tools")
+    @mcp.tool(
+        annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": True}
+    )
+    async def set_stay_restrictions(
+        property_id: int,
+        room_id: int,
+        date_from: str,
+        date_to: str,
+        min_stay: int | None = None,
+        max_stay: int | None = None,
+        override: Literal[
+            "blackout", "no_checkin", "no_checkout", "no_checkin_or_checkout", "exception", "none"
+        ] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Set minimum stay, maximum stay and/or a date override for a room.
+
+        Applies to every night from date_from to date_to, inclusive. Only the fields
+        given are sent; prices and numAvail are never sent. Give at least one of
+        min_stay, max_stay or override.
+
+        Restrictions are managed in Beds24, not PriceLabs. Confirm with the user before
+        calling this. Changes reach the channels on the next sync (Beds24 says within 24
+        hours if nothing else changes).
+
+        Caution: Beds24 itself resets numAvail to the maximum possible when an override
+        changes from blackout to none, so dates also closed with numAvail=0 (block_dates
+        or set_availability) can reopen. Check get_calendar before and after.
+
+        Reports success only if Beds24 confirms with no errors or warnings.
+
+        Args:
+            property_id: The property ID containing the room
+            room_id: The room ID to update
+            date_from: First night in YYYY-MM-DD format (today or later, Melbourne time)
+            date_to: Last night in YYYY-MM-DD format (inclusive)
+            min_stay: Minimum nights, 1 to 365
+            max_stay: Maximum nights, 1 to 364
+            override: blackout (closed), no_checkin, no_checkout, no_checkin_or_checkout,
+                exception, or none (removes the override)
+
+        Returns:
+            The values sent and the entries Beds24 says it modified
+        """
+        problem = stay_restriction_problem(date_from, date_to, min_stay, max_stay, override)
+        if problem:
+            return {"success": False, "error": problem, "metadata": {"error_type": "ValidationError"}}
+
+        values: dict[str, Any] = {}
+        if min_stay is not None:
+            values["minStay"] = min_stay
+        if max_stay is not None:
+            values["maxStay"] = max_stay
+        if override is not None:
+            values["override"] = BEDS24_OVERRIDES[override]
+
+        result = await _write_calendar(
+            "set stay restrictions", room_id, date_from, date_to,
+            values, {"property_id": property_id, "sent": values},
+        )
+        if not result["success"]:
+            return result
+
+        item = result["data"].pop("api_response")
+        if item.get("warnings"):
+            return {
+                "success": False,
+                "error": (
+                    f"Beds24 accepted the change with warnings: {item['warnings']}. "
+                    "It may be partly applied; check get_calendar."
+                ),
+                "metadata": {"error_type": "Beds24Warning"},
+            }
+        result["data"]["modified"] = item.get("modified")
+        return result
+
+    logger.info("Registered 5 calendar tools")
