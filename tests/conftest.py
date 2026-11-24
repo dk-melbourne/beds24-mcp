@@ -114,9 +114,14 @@ TOOL_ARGS: dict[str, dict[str, Any]] = {
         "notes": "replaced", "flag_color": "ff0000", "flag_text": "VIP",
     },
     "cancel_booking": {"booking_id": 111},
+    # Stay restrictions (past dates are rejected, so far in the future)
+    "set_stay_restrictions": {
+        **ROOM, "date_from": "2099-03-01", "date_to": "2099-03-03",
+        "min_stay": 2, "max_stay": 14, "override": "no_checkin_or_checkout",
+    },
 }
 WRITE_TOOLS = [
     "update_pricing", "set_availability", "block_dates",
     "create_booking", "send_message", "add_internal_note",
-    "mark_messages_read", "update_booking", "cancel_booking",
+    "mark_messages_read", "update_booking", "cancel_booking", "set_stay_restrictions",
 ]

@@ -10,7 +10,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server for the [Beds
 | Properties | `get_properties`, `get_property_rooms` |
 | Availability | `check_availability`, `get_best_price` |
 | Messages | `get_messages`, `get_unread_messages`, `send_message`, `add_internal_note` |
-| Calendar | `get_calendar`, `update_pricing`, `set_availability`, `block_dates` |
+| Calendar | `get_calendar`, `update_pricing`, `set_availability`, `block_dates`, `set_stay_restrictions` |
 
 Some tools change live data. Limit what the server can do by choosing the scopes on your Beds24 token.
 
